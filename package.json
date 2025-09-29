@@ -1,0 +1,20 @@
+{
+  "name": "vector-demo-component",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "preact": "^10.27.2",
+    "wtc-math": "^1.0.20"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.2",
+    "sass-embedded": "^1.93.2",
+    "vite": "^7.1.7"
+  }
+}
