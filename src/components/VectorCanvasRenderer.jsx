@@ -1,154 +1,11 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from "preact/hooks";
 import { Vec2 } from "wtc-math";
+
 import { Canvas } from "./Canvas.jsx";
+
 import { InstructionRunner } from "../utilities/InstructionRunner";
+import { drawGrid, drawArrow, pickColor, makeWorldToScreen, screenToWorld } from "../utilities/drawingFunctions";
 
-// Utility: convert world (cartesian) to screen pixels with origin at center
-function makeWorldToScreen(dims, unit, offsetPx = new Vec2(0,0)) {
-  const c = dims.scaleNew(.5).add(offsetPx);
-  return (v) => c.addNew(v.multiplyNew(new Vec2(1,-1)).scaleNew(unit));
-}
-
-function drawGrid(ctx, dims, unit, { gridColor, axesColor, bg, axisLineWidth = 2, gridLineWidth = 1 }) {
-  // Background
-  if (bg) {
-    ctx.save();
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, dims.x, dims.y);
-    ctx.restore();
-  } else {
-    ctx.clearRect(0, 0, dims.x, dims.y);
-  }
-
-  const toScreen = makeWorldToScreen(dims, unit);
-  const halfWidthUnits = dims.x / (2 * unit);
-  const halfHeightUnits = dims.y / (2 * unit);
-
-  ctx.save();
-  ctx.lineWidth = gridLineWidth;
-  ctx.strokeStyle = gridColor;
-
-  // Vertical grid lines (x = k)
-  for (let k = Math.ceil(-halfWidthUnits); k <= Math.floor(halfWidthUnits); k++) {
-    const p1 = toScreen(new Vec2(k, -halfHeightUnits));
-    const p2 = toScreen(new Vec2(k, +halfHeightUnits));
-    ctx.beginPath();
-    ctx.moveTo(Math.round(p1.x) + 0.5, p1.y);
-    ctx.lineTo(Math.round(p2.x) + 0.5, p2.y);
-    ctx.stroke();
-  }
-
-  // Horizontal grid lines (y = k)
-  for (let k = Math.ceil(-halfHeightUnits); k <= Math.floor(halfHeightUnits); k++) {
-    const p1 = toScreen(new Vec2(-halfWidthUnits, k));
-    const p2 = toScreen(new Vec2(+halfWidthUnits, k));
-    ctx.beginPath();
-    ctx.moveTo(p1.x, Math.round(p1.y) + 0.5);
-    ctx.lineTo(p2.x, Math.round(p2.y) + 0.5);
-    ctx.stroke();
-  }
-
-  // Axes
-  ctx.lineWidth = axisLineWidth;
-  ctx.strokeStyle = axesColor;
-
-  // x-axis (y = 0)
-  {
-    const p1 = toScreen(new Vec2(-halfWidthUnits, 0));
-    const p2 = toScreen(new Vec2(+halfWidthUnits, 0));
-    ctx.beginPath();
-    ctx.moveTo(p1.x, Math.round(p1.y) + 0.5);
-    ctx.lineTo(p2.x, Math.round(p2.y) + 0.5);
-    ctx.stroke();
-  }
-  // y-axis (x = 0)
-  {
-    const p1 = toScreen(new Vec2(0, -halfHeightUnits));
-    const p2 = toScreen(new Vec2(0, +halfHeightUnits));
-    ctx.beginPath();
-    ctx.moveTo(Math.round(p1.x) + 0.5, p1.y);
-    ctx.lineTo(Math.round(p2.x) + 0.5, p2.y);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
-
-function drawArrow(ctx, fromPx, toPx, {
-  color = "#333",
-  lineWidth = 2,
-  headSize = 8,
-  headAngle = Math.PI / 7,
-  interactive = false,
-  bg = "#ffffff"
-} = {}) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = lineWidth;
-
-  // Shaft
-  ctx.beginPath();
-  ctx.moveTo(fromPx.x, fromPx.y);
-  ctx.lineTo(toPx.x, toPx.y);
-  ctx.stroke();
-
-  // Arrow head
-  const dx = toPx.x - fromPx.x;
-  const dy = toPx.y - fromPx.y;
-  const ang = Math.atan2(dy, dx);
-
-  const left = {
-    x: toPx.x - headSize * Math.cos(ang - headAngle),
-    y: toPx.y - headSize * Math.sin(ang - headAngle)
-  };
-  const right = {
-    x: toPx.x - headSize * Math.cos(ang + headAngle),
-    y: toPx.y - headSize * Math.sin(ang + headAngle)
-  };
-
-  // Draw interactive handle behind arrowhead if enabled
-  if (interactive) {
-    ctx.beginPath();
-    ctx.arc(toPx.x, toPx.y, 8, 0, Math.PI * 2);
-
-    // Semi-transparent fill
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.globalAlpha = 1.0;
-
-    // Stroke with background color
-    ctx.strokeStyle = bg;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-
-  ctx.beginPath();
-  ctx.moveTo(toPx.x, toPx.y);
-  ctx.lineTo(left.x, left.y);
-  ctx.lineTo(right.x, right.y);
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-
-  ctx.restore();
-}
-
-
-function pickColor(properties, fallback = "#333") {
-  if (!properties) return fallback;
-  if (typeof properties.color === "string") return properties.color;
-  if (typeof properties.colour === "string") return properties.colour;
-
-  // Any hex-like string in properties
-  for (const v of Object.values(properties)) {
-    if (typeof v === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v)) {
-      return v;
-    }
-  }
-  return fallback;
-}
 
 export function VectorCanvas({
   commands,
@@ -171,8 +28,6 @@ export function VectorCanvas({
   const canvasRef = useRef(null);
   // Track dragging state
   const [dragInfo, setDragInfo] = useState(null);
-    // State to track snap points for visualization
-    const [snapPoints, setSnapPoints] = useState(null);
 
   // Parse instructions when commands change
   const runner = useMemo(() => {
@@ -194,22 +49,6 @@ export function VectorCanvas({
 
     // Prepare transform
     const toScreen = makeWorldToScreen(dims, unit);
-
-    // Visualize snap points if dragging with snap enabled
-    if (snapToGrid && dragInfo && snapPoints) {
-      ctx.save();
-      const snapPointPx = toScreen(snapPoints.worldPos);
-
-      // Draw snap indicator
-      ctx.beginPath();
-      ctx.arc(snapPointPx.x, snapPointPx.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255, 193, 7, 0.7)";
-      ctx.fill();
-      ctx.strokeStyle = "#ff9800";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.restore();
-    }
 
     // Draw vectors from runner
     if (runner && runner.variables) {
@@ -304,12 +143,9 @@ export function VectorCanvas({
         ctx.arc(...startPx, 2.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-
-        // No need for separate handling of interactive vector endpoints
-        // as this is now handled in the drawArrow function
       }
     }
-  }, [runner, unit, bg, gridColor, axesColor, vectorDefaultColor, showLabels, labelFont, arrowHeadSize, arrowLineWidth, snapToGrid, dragInfo, snapPoints]);
+  }, [runner, unit, bg, gridColor, axesColor, vectorDefaultColor, showLabels, labelFont, arrowHeadSize, arrowLineWidth, snapToGrid, dragInfo]);
 
   // Mouse event handlers for interactive vectors
   const handleMouseDown = useCallback((e) => {
@@ -319,21 +155,14 @@ export function VectorCanvas({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const mouse = new Vec2(e.clientX - rect.left, e.clientY - rect.top)
     // Use the actual dimensions of the canvas context
     const dims = canvasRef.current?.getDimensions() || { x: canvas.clientWidth, y: canvas.clientHeight };
 
     // Convert mouse position to world coordinates
     const toScreen = makeWorldToScreen(dims, unit);
-    const screenToWorld = (px) => {
-      const cx = dims.x / 2;
-      const cy = dims.y / 2;
-      return new Vec2((px.x - cx) / unit, -(px.y - cy) / unit);
-    };
 
-    const mousePx = { x: mouseX, y: mouseY };
-    const mouseWorld = screenToWorld(mousePx);
+    const mouseWorld = screenToWorld(dims, unit, mouse);
 
     // Check if we're near any interactive vector
     for (const [name, entry] of Object.entries(runner.variables)) {
@@ -341,19 +170,17 @@ export function VectorCanvas({
 
       const vec = entry.value;
       const origin = entry.properties?.origin ?? new Vec2(0, 0);
-      const startWorld = origin instanceof Vec2 ? origin : new Vec2(origin.x, origin.y);
-      const endWorld = new Vec2(startWorld.x + vec.x, startWorld.y + vec.y);
+      const end = origin.addNew(vec);
 
-      const startPx = toScreen(startWorld);
-      const endPx = toScreen(endWorld);
+      const endPx = toScreen(end);
 
       // Check if mouse is near tip of vector
-      const distToTip = Math.hypot(endPx.x - mouseX, endPx.y - mouseY);
-      if (distToTip < 15) { // 15px radius for interaction
+      const distToTip = endPx.subtractNew(mouse).lengthSquared;
+      if (distToTip < 40) {
         setDragInfo({
           vectorName: name,
-          origin: startWorld,
-          originalValue: new Vec2(vec.x, vec.y),
+          origin,
+          originalValue: vec,
           startMouse: mouseWorld
         });
         break;
@@ -368,42 +195,19 @@ export function VectorCanvas({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const mouse = new Vec2(e.clientX - rect.left, e.clientY - rect.top)
     // Use the actual dimensions of the canvas context
     const dims = canvasRef.current?.getDimensions() || { x: canvas.clientWidth, y: canvas.clientHeight };
 
-    // Convert to world coordinates
-    const screenToWorld = (px) => {
-      const cx = dims.x / 2;
-      const cy = dims.y / 2;
-      return new Vec2((px.x - cx) / unit, -(px.y - cy) / unit);
-    };
 
-    const mouseWorld = screenToWorld({ x: mouseX, y: mouseY });
+    const mouseWorld = screenToWorld(dims, unit, mouse);
 
     // Calculate new vector value based on mouse position
     let newValue = mouseWorld.subtractNew(dragInfo.origin);
 
     // Apply grid snapping if enabled
-    if (snapToGrid) {
-      // Calculate snap points
-      const snapX = Math.round(newValue.x);
-      const snapY = Math.round(newValue.y);
-
-      // Store snap points for visualization
-      setSnapPoints({
-        x: snapX,
-        y: snapY,
-        worldPos: new Vec2(snapX, snapY).add(dragInfo.origin)
-      });
-
-      // Round to nearest integer grid positions
-      newValue.x = snapX;
-      newValue.y = snapY;
-    } else {
-      setSnapPoints(null);
-    }
+    if (snapToGrid)
+      newValue.resetToVector(newValue.roundNew())
 
     // Update vector value directly
     const vectorEntry = runner.variables[dragInfo.vectorName];
@@ -439,7 +243,6 @@ export function VectorCanvas({
   const handleMouseUp = useCallback(() => {
     if (dragInfo) {
       setDragInfo(null);
-      setSnapPoints(null);
     }
   }, [dragInfo]);
 
@@ -463,7 +266,7 @@ export function VectorCanvas({
   // Redraw when relevant inputs change
   useEffect(() => {
     canvasRef.current?.redraw?.();
-  }, [draw, dragInfo, snapPoints]);
+  }, [draw, dragInfo]);
 
   const canvasStyle = useMemo(() => ({
     cursor: dragInfo ? 'grabbing' : 'default'
