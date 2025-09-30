@@ -28,8 +28,6 @@ html, body {
 #root {
   background: #EEE;
   height: 500px;
-  max-width: 90vw;
-  width: 1000px;
 }
 
 body {
