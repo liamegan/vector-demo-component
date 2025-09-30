@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useCallback, useState } from "preact/hooks";
 import { Vec2 } from "wtc-math";
-import { Canvas } from "./Canvas";
+import { Canvas } from "./Canvas.jsx";
 import { InstructionRunner } from "../utilities/InstructionRunner";
 
 // Utility: convert world (cartesian) to screen pixels with origin at center

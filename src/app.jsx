@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks'
 
-import {Canvas} from "./components/Canvas.js";
-import { VectorCanvas } from "./components/VectorCanvasRenderer.js";
+import {Canvas} from "./components/Canvas.jsx";
+import { VectorCanvas } from "./components/VectorCanvasRenderer.jsx";
 
 export function App() {
   const [count, setCount] = useState(0)
