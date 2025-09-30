@@ -8,21 +8,22 @@ export function App() {
 
 
   const commands = `
-a = Vec2(1,2), interactive, #CC3344
-b = Vec2(1, 1)
-c = a + b, origin: 4 4
-d = b - a, reference, origin: a
-e = b * 2, origin: 1 0
+a = Vec2(5,8), interactive, #CC3344
+b = Vec2(1, 10), interactive, #33CC44
+// c = a + b, reference, origin: 4 4
+d = a - b, reference, origin: b
+// e = b * 2, origin: 1 0
 `;
 
 
   return (      <VectorCanvas
       commands={commands}
-      unit={30}             // pixels per unit
+      unit={15}             // pixels per unit
       bg="#ffffff"
       gridColor="#eaecef"
       axesColor="#94a3b8"
       vectorDefaultColor="#111827"
+      snapToGrid={true}      // enable grid snapping
       debugging={true}
     />
   )

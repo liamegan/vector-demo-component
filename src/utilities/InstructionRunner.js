@@ -21,6 +21,7 @@ export class InstructionRunner {
     this.commands = commands;
     this.variables = {};
     this.errors = [];
+    this.derivedVectors = new Map(); // Track vectors derived from operations
 
     this.commands.forEach(instruction => {
       try {
@@ -30,7 +31,8 @@ export class InstructionRunner {
             const properties = this.parseProperties(instruction.modifiers);
             this.variables[instruction.variable] = {
               value,
-              properties
+              properties,
+              instruction
             };
             break;
           }
@@ -88,6 +90,10 @@ export class InstructionRunner {
           // Handle boolean-like flags
           else if (prop.value === 'interactive') {
             acc.interactive = true;
+          }
+          // Handle reference flag
+          else if (prop.value === 'reference') {
+            acc.reference = true;
           } else {
             // You could add more property types or throw an error
             console.warn(`Unrecognised property value: ${prop.value}`);
@@ -154,25 +160,77 @@ export class InstructionRunner {
         const isVecLeft = a instanceof Vec2;
         const isVecRight = b instanceof Vec2;
 
+        // Create result value based on operator
+        let result;
         switch (operator) {
           case "+":
-            if (isVecLeft && isVecRight) return a.addNew(b);
-            if (isVecLeft) return a.addScalarNew(b);
-            if (isVecRight) return b.addScalarNew(a);
-            return a + b;
+            if (isVecLeft && isVecRight) result = a.addNew(b);
+            else if (isVecLeft) result = a.addScalarNew(b);
+            else if (isVecRight) result = b.addScalarNew(a);
+            else result = a + b;
+            break;
           case "-":
-            if (isVecLeft && isVecRight) return a.subtractNew(b);
-            if (isVecLeft) return a.subtractScalarNew(b);
-            if (isVecRight) return new Vec2(a, a).scale(-1).addNew(b); // Correct scalar-vector logic
-            return a - b;
+            if (isVecLeft && isVecRight) result = a.subtractNew(b);
+            else if (isVecLeft) result = a.subtractScalarNew(b);
+            else if (isVecRight) result = new Vec2(a, a).scale(-1).addNew(b);
+            else result = a - b;
+            break;
           case "*":
-            if (isVecLeft && isVecRight) return a.multiplyNew(b);
-            if (isVecLeft) return a.scaleNew(b);
-            if (isVecRight) return b.scaleNew(a);
-            return a * b;
+            if (isVecLeft && isVecRight) result = a.multiplyNew(b);
+            else if (isVecLeft) result = a.scaleNew(b);
+            else if (isVecRight) result = b.scaleNew(a);
+            else result = a * b;
+            break;
           default:
             throw new Error(`Unrecognised operator: ${operator}`);
         }
+
+        // Store operation information for references
+        if (result instanceof Vec2) {
+          result._sourceOperation = {
+            operator,
+            operands: [a, b],
+            recompute: () => {
+                // Method to update this vector based on current operand values
+                let r;
+                switch (operator) {
+                  case "+":
+                    if (isVecLeft && isVecRight) r = a.addNew(b);
+                    else if (isVecLeft) r = a.addScalarNew(b);
+                    else if (isVecRight) r = b.addScalarNew(a);
+                    break;
+                  case "-":
+                    if (isVecLeft && isVecRight) r = a.subtractNew(b);
+                    else if (isVecLeft) r = a.subtractScalarNew(b);
+                    else if (isVecRight) r = b.subtractScalarNew(a);
+                    break;
+                  case "*":
+                    if (isVecLeft && isVecRight) r = a.multiplyNew(b);
+                    else if (isVecLeft) r = a.scaleNew(b);
+                    else if (isVecRight) r = b.scaleNew(a);
+                    break;
+                }
+                result.reset(...r)
+                return result;
+              }
+          };
+
+          // Track operands that may be vectors for reactive updates
+          if (isVecLeft) {
+            if (!this.derivedVectors.has(a)) {
+              this.derivedVectors.set(a, new Set());
+            }
+            this.derivedVectors.get(a).add(result);
+          }
+          if (isVecRight) {
+            if (!this.derivedVectors.has(b)) {
+              this.derivedVectors.set(b, new Set());
+            }
+            this.derivedVectors.get(b).add(result);
+          }
+        }
+
+        return result;
       }
       case "VariableMethodCall": {
         const { variable, method, args } = node;

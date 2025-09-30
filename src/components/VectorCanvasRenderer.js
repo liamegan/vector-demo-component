@@ -78,7 +78,9 @@ function drawArrow(ctx, fromPx, toPx, {
   color = "#333",
   lineWidth = 2,
   headSize = 8,
-  headAngle = Math.PI / 7
+  headAngle = Math.PI / 7,
+  interactive = false,
+  bg = "#ffffff"
 } = {}) {
   ctx.save();
   ctx.strokeStyle = color;
@@ -105,11 +107,29 @@ function drawArrow(ctx, fromPx, toPx, {
     y: toPx.y - headSize * Math.sin(ang + headAngle)
   };
 
+  // Draw interactive handle behind arrowhead if enabled
+  if (interactive) {
+    ctx.beginPath();
+    ctx.arc(toPx.x, toPx.y, 8, 0, Math.PI * 2);
+
+    // Semi-transparent fill
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+
+    // Stroke with background color
+    ctx.strokeStyle = bg;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   ctx.beginPath();
   ctx.moveTo(toPx.x, toPx.y);
   ctx.lineTo(left.x, left.y);
   ctx.lineTo(right.x, right.y);
   ctx.closePath();
+  ctx.fillStyle = color;
   ctx.fill();
 
   ctx.restore();
@@ -146,10 +166,13 @@ export function VectorCanvas({
   debugging = false,
   // Interaction options
   enableInteraction = true,    // master switch for interaction
+  snapToGrid = false,
 }) {
   const canvasRef = useRef(null);
   // Track dragging state
   const [dragInfo, setDragInfo] = useState(null);
+    // State to track snap points for visualization
+    const [snapPoints, setSnapPoints] = useState(null);
 
   // Parse instructions when commands change
   const runner = useMemo(() => {
@@ -171,6 +194,22 @@ export function VectorCanvas({
 
     // Prepare transform
     const toScreen = makeWorldToScreen(dims, unit);
+
+    // Visualize snap points if dragging with snap enabled
+    if (snapToGrid && dragInfo && snapPoints) {
+      ctx.save();
+      const snapPointPx = toScreen(snapPoints.worldPos);
+
+      // Draw snap indicator
+      ctx.beginPath();
+      ctx.arc(snapPointPx.x, snapPointPx.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 193, 7, 0.7)";
+      ctx.fill();
+      ctx.strokeStyle = "#ff9800";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Draw vectors from runner
     if (runner && runner.variables) {
@@ -197,8 +236,50 @@ export function VectorCanvas({
         drawArrow(ctx, startPx, endPx, {
           color,
           lineWidth: arrowLineWidth,
-          headSize: arrowHeadSize
+          headSize: arrowHeadSize,
+          interactive: properties.interactive,
+          bg
         });
+
+        // Display reference information if this is a reference vector
+        if (properties.reference && vec._sourceOperation) {
+          const { operator, operands } = vec._sourceOperation;
+
+          // Find variable names for the operands
+          const operandVars = [];
+          for (const [varName, varEntry] of Object.entries(runner.variables)) {
+            if (!varEntry || !varEntry.value) continue;
+            if (operands.includes(varEntry.value)) {
+              operandVars.push(varName);
+            }
+          }
+
+          // Draw reference info if we found at least one operand variable name
+          if (operandVars.length > 0) {
+            ctx.save();
+
+            // Map operators to display symbols
+            const opSymbols = {
+              '+': '+',
+              '-': '-',
+              '*': '×',
+              '/': '÷'
+            };
+            const opSymbol = opSymbols[operator] || operator;
+
+            // Create reference text
+            const refText = operandVars.join(` ${opSymbol} `);
+
+            // Draw reference info above the vector
+            ctx.font = labelFont;
+            ctx.fillStyle = color;
+            ctx.textBaseline = "bottom";
+            ctx.textAlign = "center";
+            ctx.fillText(refText, midPx.x, midPx.y - 15);
+
+            ctx.restore();
+          }
+        }
 
         // Optional label
         if (showLabels && name) {
@@ -224,22 +305,11 @@ export function VectorCanvas({
         ctx.fill();
         ctx.restore();
 
-        // Visual feedback for interactive vectors
-        if (properties.interactive) {
-          // Highlight the endpoint/handle
-          ctx.save();
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(endPx.x, endPx.y, 6, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = bg;
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.restore();
-        }
+        // No need for separate handling of interactive vector endpoints
+        // as this is now handled in the drawArrow function
       }
     }
-  }, [runner, unit, bg, gridColor, axesColor, vectorDefaultColor, showLabels, labelFont, arrowHeadSize, arrowLineWidth]);
+  }, [runner, unit, bg, gridColor, axesColor, vectorDefaultColor, showLabels, labelFont, arrowHeadSize, arrowLineWidth, snapToGrid, dragInfo, snapPoints]);
 
   // Mouse event handlers for interactive vectors
   const handleMouseDown = useCallback((e) => {
@@ -313,20 +383,63 @@ export function VectorCanvas({
     const mouseWorld = screenToWorld({ x: mouseX, y: mouseY });
 
     // Calculate new vector value based on mouse position
-    const newValue = mouseWorld.subtractNew(dragInfo.origin);
+    let newValue = mouseWorld.subtractNew(dragInfo.origin);
+
+    // Apply grid snapping if enabled
+    if (snapToGrid) {
+      // Calculate snap points
+      const snapX = Math.round(newValue.x);
+      const snapY = Math.round(newValue.y);
+
+      // Store snap points for visualization
+      setSnapPoints({
+        x: snapX,
+        y: snapY,
+        worldPos: new Vec2(snapX, snapY).add(dragInfo.origin)
+      });
+
+      // Round to nearest integer grid positions
+      newValue.x = snapX;
+      newValue.y = snapY;
+    } else {
+      setSnapPoints(null);
+    }
 
     // Update vector value directly
     const vectorEntry = runner.variables[dragInfo.vectorName];
     if (vectorEntry && vectorEntry.value instanceof Vec2) {
-      vectorEntry.value.x = newValue.x;
-      vectorEntry.value.y = newValue.y;
+      const vector = vectorEntry.value;
+      vector.x = newValue.x;
+      vector.y = newValue.y;
+
+      // Update only derived vectors marked as references
+      if (runner.derivedVectors && runner.derivedVectors.has(vector)) {
+        const dependentVectors = runner.derivedVectors.get(vector);
+        for (const dependent of dependentVectors) {
+          // Find the variable entry for this dependent vector
+          let isReference = false;
+          for (const [varName, varEntry] of Object.entries(runner.variables)) {
+            if (varEntry.value === dependent && varEntry.properties?.reference) {
+              isReference = true;
+              break;
+            }
+          }
+
+          // Only update if it's marked as a reference
+          if (isReference && dependent._sourceOperation && typeof dependent._sourceOperation.recompute === 'function') {
+            dependent._sourceOperation.recompute();
+          }
+        }
+      }
+
       canvasRef.current?.redraw?.();
     }
-  }, [dragInfo, runner, unit]);
+  }, [dragInfo, runner, unit, snapToGrid]);
 
   const handleMouseUp = useCallback(() => {
     if (dragInfo) {
       setDragInfo(null);
+      setSnapPoints(null);
     }
   }, [dragInfo]);
 
@@ -350,7 +463,7 @@ export function VectorCanvas({
   // Redraw when relevant inputs change
   useEffect(() => {
     canvasRef.current?.redraw?.();
-  }, [draw, dragInfo]);
+  }, [draw, dragInfo, snapPoints]);
 
   const canvasStyle = useMemo(() => ({
     cursor: dragInfo ? 'grabbing' : 'default'
