@@ -8,7 +8,3 @@ export default defineConfig({
   // Base URL for GitHub Pages - can be overridden by --base flag
   // base: './' // Adding in package.json build command instead
 })
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [preact()],
-})
