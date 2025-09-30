@@ -10,8 +10,8 @@ export function App() {
   const commands = `
 a = Vec2(1,2), interactive, #CC3344
 b = Vec2(1, 1)
-c = a + b, origin: 5 5
-d = b - a, origin: a
+c = a + b, origin: 4 4
+d = b - a, reference, origin: a
 e = b * 2, origin: 1 0
 `;
 

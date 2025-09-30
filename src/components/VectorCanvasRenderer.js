@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useCallback } from "preact/hooks";
+import { useEffect, useMemo, useRef, useCallback, useState } from "preact/hooks";
 import { Vec2 } from "wtc-math";
 import { Canvas } from "./Canvas";
 import { InstructionRunner } from "../utilities/InstructionRunner";
@@ -144,8 +144,12 @@ export function VectorCanvas({
   arrowHeadSize = 8,
   arrowLineWidth = 2,
   debugging = false,
+  // Interaction options
+  enableInteraction = true,    // master switch for interaction
 }) {
   const canvasRef = useRef(null);
+  // Track dragging state
+  const [dragInfo, setDragInfo] = useState(null);
 
   // Parse instructions when commands change
   const runner = useMemo(() => {
@@ -219,16 +223,140 @@ export function VectorCanvas({
         ctx.arc(...startPx, 2.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+
+        // Visual feedback for interactive vectors
+        if (properties.interactive) {
+          // Highlight the endpoint/handle
+          ctx.save();
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(endPx.x, endPx.y, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = bg;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.restore();
+        }
       }
     }
   }, [runner, unit, bg, gridColor, axesColor, vectorDefaultColor, showLabels, labelFont, arrowHeadSize, arrowLineWidth]);
 
+  // Mouse event handlers for interactive vectors
+  const handleMouseDown = useCallback((e) => {
+    if (!enableInteraction || !runner) return;
+
+    const canvas = canvasRef.current?.getContext()?.canvas;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    // Use the actual dimensions of the canvas context
+    const dims = canvasRef.current?.getDimensions() || { x: canvas.clientWidth, y: canvas.clientHeight };
+
+    // Convert mouse position to world coordinates
+    const toScreen = makeWorldToScreen(dims, unit);
+    const screenToWorld = (px) => {
+      const cx = dims.x / 2;
+      const cy = dims.y / 2;
+      return new Vec2((px.x - cx) / unit, -(px.y - cy) / unit);
+    };
+
+    const mousePx = { x: mouseX, y: mouseY };
+    const mouseWorld = screenToWorld(mousePx);
+
+    // Check if we're near any interactive vector
+    for (const [name, entry] of Object.entries(runner.variables)) {
+      if (!entry || !entry.value || !entry.properties?.interactive) continue;
+
+      const vec = entry.value;
+      const origin = entry.properties?.origin ?? new Vec2(0, 0);
+      const startWorld = origin instanceof Vec2 ? origin : new Vec2(origin.x, origin.y);
+      const endWorld = new Vec2(startWorld.x + vec.x, startWorld.y + vec.y);
+
+      const startPx = toScreen(startWorld);
+      const endPx = toScreen(endWorld);
+
+      // Check if mouse is near tip of vector
+      const distToTip = Math.hypot(endPx.x - mouseX, endPx.y - mouseY);
+      if (distToTip < 15) { // 15px radius for interaction
+        setDragInfo({
+          vectorName: name,
+          origin: startWorld,
+          originalValue: new Vec2(vec.x, vec.y),
+          startMouse: mouseWorld
+        });
+        break;
+      }
+    }
+  }, [runner, enableInteraction, unit]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!dragInfo || !runner) return;
+
+    const canvas = canvasRef.current?.getContext()?.canvas;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    // Use the actual dimensions of the canvas context
+    const dims = canvasRef.current?.getDimensions() || { x: canvas.clientWidth, y: canvas.clientHeight };
+
+    // Convert to world coordinates
+    const screenToWorld = (px) => {
+      const cx = dims.x / 2;
+      const cy = dims.y / 2;
+      return new Vec2((px.x - cx) / unit, -(px.y - cy) / unit);
+    };
+
+    const mouseWorld = screenToWorld({ x: mouseX, y: mouseY });
+
+    // Calculate new vector value based on mouse position
+    const newValue = mouseWorld.subtractNew(dragInfo.origin);
+
+    // Update vector value directly
+    const vectorEntry = runner.variables[dragInfo.vectorName];
+    if (vectorEntry && vectorEntry.value instanceof Vec2) {
+      vectorEntry.value.x = newValue.x;
+      vectorEntry.value.y = newValue.y;
+      canvasRef.current?.redraw?.();
+    }
+  }, [dragInfo, runner, unit]);
+
+  const handleMouseUp = useCallback(() => {
+    if (dragInfo) {
+      setDragInfo(null);
+    }
+  }, [dragInfo]);
+
+  // Setup event listeners
+  useEffect(() => {
+    // We need to target the canvas element directly
+    const canvasElement = canvasRef.current?.getContext()?.canvas;
+    if (!canvasElement) return;
+
+    canvasElement.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      canvasElement.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [handleMouseDown, handleMouseMove, handleMouseUp, canvasRef.current]);
+
   // Redraw when relevant inputs change
   useEffect(() => {
     canvasRef.current?.redraw?.();
-  }, [draw]);
+  }, [draw, dragInfo]);
+
+  const canvasStyle = useMemo(() => ({
+    cursor: dragInfo ? 'grabbing' : 'default'
+  }), [dragInfo]);
 
   return (
-    <Canvas ref={canvasRef} draw={draw} />
+    <Canvas ref={canvasRef} draw={draw} style={canvasStyle} />
   );
 }
