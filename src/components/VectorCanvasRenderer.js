@@ -4,10 +4,9 @@ import { Canvas } from "./Canvas";
 import { InstructionRunner } from "../utilities/InstructionRunner";
 
 // Utility: convert world (cartesian) to screen pixels with origin at center
-function makeWorldToScreen(dims, unit, offsetPx = { x: 0, y: 0 }) {
-  const cx = dims.x / 2 + offsetPx.x;
-  const cy = dims.y / 2 + offsetPx.y;
-  return (v) => new Vec2(cx + v.x * unit, cy - v.y * unit);
+function makeWorldToScreen(dims, unit, offsetPx = new Vec2(0,0)) {
+  const c = dims.scaleNew(.5).add(offsetPx);
+  return (v) => c.addNew(v.multiplyNew(new Vec2(1,-1)).scaleNew(unit));
 }
 
 function drawGrid(ctx, dims, unit, { gridColor, axesColor, bg, axisLineWidth = 2, gridLineWidth = 1 }) {
@@ -116,31 +115,6 @@ function drawArrow(ctx, fromPx, toPx, {
   ctx.restore();
 }
 
-function parseOrigin(properties) {
-  if (!properties) return { x: 0, y: 0 };
-  const p = properties.origin ?? properties.Origin ?? properties.ORIGIN;
-
-  if (p instanceof Vec2) return { x: p.x, y: p.y };
-
-  // "5 5", "5,5"
-  if (typeof p === "string") {
-    const parts = p.split(/[\s,]+/).map(Number).filter(n => !Number.isNaN(n));
-    if (parts.length >= 2) return { x: parts[0], y: parts[1] };
-  }
-
-  // [5,5]
-  if (Array.isArray(p) && p.length >= 2) {
-    const [x, y] = p;
-    if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
-  }
-
-  // Separate keys
-  if (Number.isFinite(properties.originX) && Number.isFinite(properties.originY)) {
-    return { x: properties.originX, y: properties.originY };
-  }
-
-  return { x: 0, y: 0 };
-}
 
 function pickColor(properties, fallback = "#333") {
   if (!properties) return fallback;
@@ -200,19 +174,15 @@ export function VectorCanvas({
         if (!entry || !entry.value) continue;
 
         const vec = entry.value;
-        // Only handle Vec2-like values
-        const vx = typeof vec.x === "number" ? vec.x : (vec[0] ?? null);
-        const vy = typeof vec.y === "number" ? vec.y : (vec[1] ?? null);
-        if (!Number.isFinite(vx) || !Number.isFinite(vy)) continue;
 
         const properties = entry.properties ?? {};
         const color = pickColor(properties, vectorDefaultColor);
 
         // Origin in world units, defaults to (0,0)
-        const origin = parseOrigin(properties);
+        const origin = properties?.origin ?? new Vec2(0, 0);
 
-        const startWorld = new Vec2(origin.x, origin.y);
-        const endWorld = new Vec2(origin.x + vx, origin.y + vy);
+        const startWorld = origin.clone();
+        const endWorld = origin.addNew(vec);
 
         const startPx = toScreen(startWorld);
         const endPx = toScreen(endWorld);
@@ -236,39 +206,20 @@ export function VectorCanvas({
           ctx.fillStyle = color;
           ctx.textBaseline = "middle";
           ctx.textAlign = "center";
-          ctx.strokeText(String(name), midPx.x, midPx.y);
-          ctx.fillText(String(name), midPx.x, midPx.y);
+          ctx.strokeText(String(name), ...midPx);
+          ctx.fillText(String(name), ...midPx);
 
           ctx.restore();
         }
 
-        // Optional: small dot at the origin point of the vector
+        // dot at the origin point of the vector
         ctx.save();
         ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.arc(startPx.x, startPx.y, 2.5, 0, Math.PI * 2);
+        ctx.arc(...startPx, 2.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
-    }
-
-    // If there were parsing/execution errors, log them
-    if (runner && runner.errors && runner.errors.length) {
-      // Draw a translucent overlay for errors (optional)
-      ctx.save();
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.fillRect(8, 8, dims.x - 16, Math.min(120, dims.y - 16));
-      ctx.restore();
-
-      ctx.save();
-      ctx.fillStyle = "#b91c1c";
-      ctx.font = "12px system-ui";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      const text = runner.errors.slice(0, 5).join("\n");
-      ctx.fillText(text, 16, 16);
-      ctx.restore();
     }
   }, [runner, unit, bg, gridColor, axesColor, vectorDefaultColor, showLabels, labelFont, arrowHeadSize, arrowLineWidth]);
 
