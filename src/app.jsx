@@ -11,7 +11,7 @@ export function App() {
 a = Vec2(1,2), interactive, #CC3344
 b = Vec2(1, 1)
 c = a + b, origin: 5 5
-d = b - a, origin: 1 2
+d = b - a, origin: a
 e = b * 2, origin: 1 0
 `;
 
@@ -23,6 +23,7 @@ e = b * 2, origin: 1 0
       gridColor="#eaecef"
       axesColor="#94a3b8"
       vectorDefaultColor="#111827"
+      debugging={true}
     />
   )
 }

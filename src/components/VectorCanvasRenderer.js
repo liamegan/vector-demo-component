@@ -169,12 +169,14 @@ export function VectorCanvas({
   // Arrow options
   arrowHeadSize = 8,
   arrowLineWidth = 2,
+  debugging = false,
 }) {
   const canvasRef = useRef(null);
 
   // Parse instructions when commands change
   const runner = useMemo(() => {
     try {
+      if(debugging) console.log(InstructionRunner.parse({ commands: commands ?? "" }))
       return InstructionRunner.parse({ commands: commands ?? "" });
     } catch (e) {
       console.error("Instruction parse error:", e);

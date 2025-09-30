@@ -67,7 +67,14 @@ export class InstructionRunner {
           // Handle specific function-like properties
           if (prop.name === 'origin') {
             const resolvedArgs = prop.args.map(arg => this.evaluateExpression(arg));
-            acc.origin = new Vec2(...resolvedArgs);
+
+            // Check if we have exactly one argument and it's a Vec2 (referenced by variable)
+            if (resolvedArgs.length === 1 && resolvedArgs[0] instanceof Vec2) {
+              acc.origin = resolvedArgs[0]; // Use the vector reference directly
+            } else {
+              // Otherwise create a new Vec2 from the numeric arguments
+              acc.origin = new Vec2(...resolvedArgs);
+            }
           } else {
             throw new Error(`Unrecognised property function: ${prop.name}`);
           }
